@@ -5,3 +5,5 @@ __pycache__/
 demos/
 .DS_Store
 *.pyc
+docs/mock_case.md
+docs/step-by-step.html
