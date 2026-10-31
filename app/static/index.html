@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LangGraph Banking — learning app</title>
+<!-- Single file, no build step. Mermaid (CDN) draws the graph; if offline you still see the text. -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: #f6f7fb; color: #222; }
+  header { padding: 10px 16px; background: #24215a; color: #fff; display: flex; gap: 16px; align-items: baseline; }
+  header small { opacity: .75; }
+  main { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; padding: 12px; }
+  section { background: #fff; border: 1px solid #e3e3ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #555; margin: 0 0 8px; }
+  h2 .hint { text-transform: none; letter-spacing: 0; font-weight: normal; color: #888; }
+  pre { background: #f4f4f8; padding: 6px 8px; border-radius: 6px; overflow: auto; font-size: 12px; margin: 4px 0; max-height: 320px; }
+  button { cursor: pointer; border: 1px solid #c9c6ef; background: #f2f0ff; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+  button.primary { background: #4b3fd6; color: #fff; border-color: #4b3fd6; }
+  button.danger { background: #fff0f0; border-color: #e6b3b3; }
+  #log { height: 260px; overflow: auto; border: 1px solid #eee; border-radius: 6px; padding: 6px; background: #fcfcff; }
+  .msg { margin: 4px 0; padding: 6px 8px; border-radius: 6px; max-width: 92%; }
+  .user { background: #e8e6ff; margin-left: auto; }
+  .bot { background: #eef7ee; }
+  .sys { background: #fff6e0; font-size: 12px; }
+  .row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  input[type=text] { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+  .step { border-left: 3px solid #b9b2f5; padding: 4px 8px; margin: 6px 0; }
+  .step.interrupt { border-color: #f0a500; background: #fffaf0; }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #eee; margin-left: 4px; }
+  .badge.LLM { background: #ffe1f0; } .badge.interrupt { background: #ffe9b8; }
+  a.topic { font-size: 11px; margin-left: 4px; color: #4b3fd6; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid #eee; }
+  .status { font-weight: 600; }
+  .approval-card { border: 2px solid #4b3fd6; border-radius: 8px; padding: 8px; margin: 6px 0; background: #f8f7ff; }
+  details.note { border-bottom: 1px solid #eee; padding: 4px 0; }
+  details.note summary { cursor: pointer; }
+  details.note.flash { background: #fff3c4; }
+  #notes { max-height: 420px; overflow: auto; }
+  .muted { color: #888; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <b>LangGraph banking assistant — learning app</b>
+  <small>Fictional data only. No real bank, no real money.</small>
+  <small id="extractor"></small>
+</header>
+<main>
+  <!-- ======================= COLUMN 1: user + bank ======================= -->
+  <div>
+    <section>
+      <h2>1 · Chat <span class="hint">(the user talks to the agent)</span></h2>
+      <div id="log"></div>
+      <div class="row">
+        <input id="text" type="text" placeholder="Ask something…" autocomplete="off">
+        <button class="primary" onclick="send()">Send</button>
+      </div>
+      <div class="row muted">Try:
+        <button onclick="say('How much did I spend on restaurants last month?')">restaurants</button>
+        <button onclick="say('How much did I spend on food last month?')">ambiguous “food”</button>
+        <button onclick="say('Transfer 500 euros to Alex')">€500 to Alex</button>
+        <button onclick="say('Send 20 EUR to Sam')">€20 to Sam</button>
+        <button onclick="say('Send 30 EUR to Maria')">€30 to Maria</button>
+      </div>
+      <div id="threadInfo" class="muted"></div>
+    </section>
+
+    <section>
+      <h2>2 · Bank app approval <span class="hint">(trusted — NOT the chat)</span></h2>
+      <div id="approvals" class="muted">No transfers waiting.</div>
+    </section>
+
+    <section>
+      <h2>3 · Mock bank <span class="hint">(source of truth)</span></h2>
+      <div>Balance: <b id="balance"></b></div>
+      <table id="transfers"></table>
+      <div class="row">
+        <button onclick="runWorker()">▶ Run payment worker (drain outbox)</button>
+      </div>
+      <h2 style="margin-top:10px">Notifications inbox</h2>
+      <div id="notifications" class="muted"></div>
+      <details style="margin-top:8px"><summary class="muted">Seeded transactions</summary><table id="txs"></table></details>
+    </section>
+  </div>
+
+  <!-- ======================= COLUMN 2: graph + trace ======================= -->
+  <div>
+    <section>
+      <h2>Graph <span class="hint">solid = edge · dotted = conditional edge · green = ran · orange = paused here</span></h2>
+      <div id="graph"></div>
+    </section>
+    <section>
+      <h2>Execution trace <span class="hint">(one row per node; what it returned = its state update)</span></h2>
+      <div id="trace" class="muted">Send a message to see nodes run.</div>
+    </section>
+  </div>
+
+  <!-- ======================= COLUMN 3: state + study ======================= -->
+  <div>
+    <section>
+      <h2>State inspector <span class="hint">(checkpoint of the current thread)</span></h2>
+      <div id="stateHead" class="muted">No thread yet.</div>
+      <pre id="state"></pre>
+    </section>
+    <section>
+      <h2>Study notes <span class="hint">(click a Qxx tag anywhere)</span></h2>
+      <div id="notes"></div>
+    </section>
+    <section>
+      <h2>Evaluation <span class="hint">(labeled cases, offline)</span></h2>
+      <button onclick="runEval()">Run eval</button>
+      <div id="eval"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+let NODES = {}, MERMAID = "", currentThread = null, pendingClarify = false;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const eur = (m) => (m / 100).toFixed(2) + " EUR";
+const api = async (path, body) => {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+};
+const topics = (ids) => (ids || []).map(q => `<a class="topic" onclick="openNote('${q}')">${q}</a>`).join("");
+
+function addMsg(cls, html) { $("log").insertAdjacentHTML("beforeend", `<div class="msg ${cls}">${html}</div>`); $("log").scrollTop = 1e9; }
+
+// ---------------------------------------------------------------- chat
+function say(t) { $("text").value = t; send(); }
+async function send() {
+  const text = $("text").value.trim(); if (!text) return;
+  $("text").value = ""; addMsg("user", esc(text));
+  // Only reuse the thread when it is waiting for a clarification answer.
+  const res = await api("/api/chat", {text, thread_id: pendingClarify ? currentThread : null});
+  show(res);
+}
+$("text").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+function show(res) {
+  currentThread = res.thread_id;
+  const intr = res.interrupt;
+  pendingClarify = !!(intr && intr.kind === "clarify");
+  if (res.refused) addMsg("sys", "⛔ " + esc(res.refused));
+  else if (intr && intr.kind === "clarify") addMsg("bot", "❓ " + esc(intr.question) + ` <span class="muted">(graph paused in <code>clarify</code>)</span>`);
+  else if (intr && intr.kind === "approval") addMsg("bot", `I prepared transfer <b>${intr.transfer_id}</b>: <b>${esc(intr.amount)}</b> to <b>${esc(intr.recipient)}</b>. Please approve it in your bank app (panel 2). <span class="muted">(graph paused in <code>await_approval</code>)</span>`);
+  else if (res.state.response) addMsg("bot", esc(res.state.response));
+  if (res.state.result && res.state.result.transactions) {
+    const rows = res.state.result.transactions.map(t => `<tr><td>${t.day}</td><td>${esc(t.merchant)}</td><td>${eur(t.amount_minor)}</td></tr>`).join("");
+    addMsg("sys", `Tool data (untrusted text, displayed only):<table>${rows}</table>`);
+  }
+  $("threadInfo").innerHTML = `thread_id: <code>${res.thread_id}</code>` + (res.state.transfer_id ? ` · transfer_id: <code>${res.state.transfer_id}</code>` : "");
+  renderTrace(res.trace); renderState(res); drawGraph(res); refreshBank();
+}
+
+// ---------------------------------------------------------------- trace + state
+function renderTrace(trace) {
+  if (!trace || !trace.length) return;
+  $("trace").innerHTML = trace.map(s => {
+    const info = NODES[s.node] || {kind: "interrupt", explain: "Graph paused. State is checkpointed; the HTTP request returns now.", topics: ["Q26", "Q27"]};
+    return `<div class="step ${s.node.includes("interrupt") ? "interrupt" : ""}">
+      <b>${esc(s.node)}</b><span class="badge ${info.kind}">${info.kind}</span>${topics(info.topics)}
+      <div class="muted">${esc(info.explain)}</div>
+      <pre>${esc(JSON.stringify(s.update, null, 2))}</pre></div>`;
+  }).join("");
+}
+function renderState(res) {
+  $("stateHead").innerHTML = `thread_id <code>${res.thread_id}</code> · next: <code>${JSON.stringify(res.next)}</code>` +
+    (res.state.bank_status_snapshot ? `<br>⚠ <code>bank_status_snapshot</code> is a copy read from the bank — not authoritative${topics(["Q08"])}` : "");
+  $("state").textContent = JSON.stringify(res.state, null, 2);
+}
+async function loadThread(id) { const res = await api(`/api/threads/${id}`); res.trace = []; currentThread = id; renderState(res); drawGraph(res); }
+
+// ---------------------------------------------------------------- graph
+async function drawGraph(res) {
+  let src = MERMAID;
+  if (res && res.trace) {
+    const ran = [...new Set(res.trace.map(s => s.node).filter(n => NODES[n]))];
+    src += `\n\tclassDef ran fill:#c8f0c8\n\tclassDef paused fill:#ffd27a,stroke:#c77d00,stroke-width:2px`;
+    if (ran.length) src += `\n\tclass ${ran.join(",")} ran`;
+    if (res.next && res.next.length) src += `\n\tclass ${res.next.join(",")} paused`;
+  }
+  try {
+    const {svg} = await mermaid.render("g" + Date.now(), src);
+    $("graph").innerHTML = svg;
+  } catch (e) { $("graph").innerHTML = `<pre>${esc(src)}</pre>`; }
+}
+
+// ---------------------------------------------------------------- bank
+async function refreshBank() {
+  const b = await api("/api/bank");
+  $("balance").textContent = eur(b.balance);
+  $("transfers").innerHTML = "<tr><th>transfer_id (bank)</th><th>to</th><th>amount</th><th>status</th><th>thread_id (agent)</th><th></th></tr>" +
+    b.transfers.map(t => `<tr><td><code>${t.id}</code></td><td>${esc(t.recipient_name)}</td><td>${eur(t.amount_minor)}</td>
+      <td class="status">${t.status}</td><td><a class="topic" onclick="loadThread('${t.thread_id}')">${t.thread_id}</a></td>
+      <td>${t.status === "COMPLETED" ? `<button title="Simulate the same event delivered twice" onclick="replay('${t.id}')">replay event</button>` : ""}</td></tr>`).join("");
+  const pending = b.transfers.filter(t => t.status === "PENDING_APPROVAL");
+  $("approvals").innerHTML = pending.length ? pending.map(t => `<div class="approval-card">
+      Approve exactly <b>${eur(t.amount_minor)}</b> to <b>${esc(t.recipient_name)}</b>?<br>
+      <span class="muted">transfer <code>${t.id}</code> → resumes thread <code>${t.thread_id}</code></span>${topics(["Q04", "Q30"])}
+      <div class="row"><button class="primary" onclick="decide('${t.id}', 'approve')">Approve</button>
+      <button class="danger" onclick="decide('${t.id}', 'reject')">Reject</button></div></div>`).join("")
+    : "No transfers waiting.";
+  $("notifications").innerHTML = b.notifications.length ? b.notifications.map(n => `🔔 ${esc(n.text)}`).join("<br>") : "Empty.";
+  $("txs").innerHTML = b.transactions.map(t => `<tr><td>${t.day}</td><td>${esc(t.merchant)}</td><td>${t.category}</td><td>${eur(t.amount_minor)}</td></tr>`).join("");
+}
+async function decide(id, action) {
+  try {
+    const res = await api(`/api/bank/transfers/${id}/${action}`, {});
+    addMsg("sys", `🏦 Bank recorded <b>${action}</b> for ${id} → resumed thread <code>${res.thread_id}</code>`);
+    show(res);
+  } catch (e) { addMsg("sys", "⛔ " + esc(e.message)); }
+}
+async function runWorker() {
+  const r = await api("/api/bank/worker/run", {});
+  addMsg("sys", `⚙ Worker processed: ${r.processed.length ? r.processed.join(", ") : "nothing (outbox empty)"}`);
+  refreshBank();
+}
+async function replay(id) {
+  const r = await api(`/api/bank/transfers/${id}/replay`, {});
+  addMsg("sys", `🔁 Duplicate event for ${id}: payment did work? <b>${r.payment_did_work}</b> · new notification? <b>${r.new_notification}</b> (idempotent ✓)` + topics(["Q05", "Q11"]));
+  refreshBank();
+}
+
+// ---------------------------------------------------------------- notes + eval
+function md(s) { return esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>"); }
+async function loadNotes() {
+  const notes = await api("/api/notes");
+  $("notes").innerHTML = notes.map(n => {
+    const paras = n.body.split(/\n\n+/);
+    const shown = paras.filter(p => /^\*\*(Explore)/.test(p));
+    const hidden = paras.filter(p => !/^\*\*(Explore)/.test(p));
+    return `<details class="note" id="note-${n.id}"><summary><b>${n.id}</b> ${md(n.title)}</summary>
+      ${shown.map(p => `<p>${md(p)}</p>`).join("")}
+      <details><summary class="muted">Reveal explanation</summary>${hidden.map(p => `<p>${md(p)}</p>`).join("")}</details></details>`;
+  }).join("");
+}
+function openNote(id) {
+  const el = $("note-" + id); if (!el) return;
+  el.open = true; el.scrollIntoView({behavior: "smooth", block: "center"});
+  el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1500);
+}
+async function runEval() {
+  const r = await api("/api/eval");
+  $("eval").innerHTML = `<p>extractor <b>${r.extractor}</b> · intent ${(r.intent_accuracy*100).toFixed(0)}% · slots ${(r.slot_accuracy*100).toFixed(0)}% · route ${(r.route_accuracy*100).toFixed(0)}% · false-confident <b>${r.false_confident}</b>${topics(["Q32","Q33"])}</p>
+    <table><tr><th>text</th><th>expected</th><th>got</th></tr>${r.rows.map(x => `<tr><td>${x.intent && x.slots && x.outcome ? "✓" : "✗"} ${esc(x.text)}</td><td>${x.expected}</td><td>${x.got}</td></tr>`).join("")}</table>`;
+}
+
+// ---------------------------------------------------------------- boot
+(async () => {
+  if (window.mermaid) mermaid.initialize({startOnLoad: false});
+  const g = await api("/api/graph");
+  NODES = g.nodes; MERMAID = g.mermaid; $("extractor").textContent = `extractor: ${g.extractor}`;
+  drawGraph(null); refreshBank(); loadNotes();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{"text": "How much did I spend on restaurants last month?", "intent": "spending_summary", "categories": ["restaurants"], "period": "last_month", "outcome": "answer"}
+{"text": "What did eating out cost me this month?", "intent": "spending_summary", "categories": ["restaurants"], "period": "this_month", "outcome": "answer"}
+{"text": "How much have I spent on groceries last month", "intent": "spending_summary", "categories": ["groceries"], "period": "last_month", "outcome": "answer"}
+{"text": "Show my supermarket spending", "intent": "spending_summary", "categories": ["groceries"], "outcome": "answer"}
+{"text": "How much did I spend on metro and taxi last month?", "intent": "spending_summary", "categories": ["transport"], "outcome": "answer"}
+{"text": "How much did I spend on food last month?", "intent": "spending_summary", "outcome": "clarify"}
+{"text": "How much did I spend on eating last month?", "intent": "spending_summary", "outcome": "clarify"}
+{"text": "How much did I spend?", "intent": "spending_summary", "outcome": "clarify"}
+{"text": "Transfer 500 euros to Alex", "intent": "transfer_money", "recipient_query": "Alex", "amount_minor": 50000, "outcome": "clarify"}
+{"text": "Transfer 500 euros to Alex Novak", "intent": "transfer_money", "recipient_query": "Alex Novak", "amount_minor": 50000, "outcome": "approval"}
+{"text": "Send 20 EUR to Sam please", "intent": "transfer_money", "recipient_query": "Sam", "amount_minor": 2000, "outcome": "approval"}
+{"text": "Pay Maria Rossi... actually send €12.50 to Maria", "intent": "transfer_money", "recipient_query": "Maria", "amount_minor": 1250, "outcome": "approval"}
+{"text": "Send money to Sam", "intent": "transfer_money", "recipient_query": "Sam", "outcome": "clarify"}
+{"text": "Transfer 100 euros to Mallory", "intent": "transfer_money", "recipient_query": "Mallory", "amount_minor": 10000, "outcome": "clarify"}
+{"text": "What's the weather like?", "intent": "unknown", "outcome": "answer"}
+{"text": "Tell me a joke about banks", "intent": "unknown", "outcome": "answer"}
